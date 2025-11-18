@@ -3,10 +3,6 @@ import csv
 import numpy as np
 import pandas as pd
 
-"""
-Process to concatenate the whole dictionnary structures into one big array of size ( 1 000 000, 22)
-the 22 features corresponding to the 6 epsilons deformation components and the 16 ply-modes (4 ply orientations x 4 modes)
-"""
 
 with open("dataset/dataset.pkl", "rb") as f:
     dataset = pickle.load(f)
