@@ -2,12 +2,13 @@ import pickle
 import csv
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, f1_score, recall_score, precision_score, confusion_matrix
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from sklearn.svm import LinearSVC
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import StratifiedKFold
+
 
 
 with open("dataset/dataset.pkl", "rb") as f:
@@ -49,7 +50,9 @@ data_df = pd.concat([eps_df, plies_df], axis=1)
 print(data_df.shape)    # (1_000_000, 22)
 print(data_df.head())
 
-x = data_df.values
+#x = data_df.values
+# Use only the first 6 features (eps1-eps6)
+x = eps_df.values
 
 # Build label for the all dataset
 
@@ -118,10 +121,6 @@ print(numb_15)
 print(numb_16)
 
 
-
-#downsample to balance 
-
-
 counts = {
     0: 209953,
     1: 87948,
@@ -147,6 +146,9 @@ K = data_df[fi_cols].shape[1] #number of features without deformation epsilon
 
 class_weights = {c: N / (K * n) for c, n in counts.items()}
 
+class_weights = pd.Series(class_weights)
+class_weights /= class_weights.mean()
+class_weights = class_weights.to_dict()
 
 #extract data into 80% train/ 20%test
 # x = eps_df.values only epsilon ? 
@@ -163,13 +165,7 @@ x_train = scaler.fit_transform(x_train)
 x_test  = scaler.transform(x_test)
 
 # SVM
-#svm_clf = LinearSVC(C=0.1, dual=False)  # solvinf primal prbl is good when n_samples > n_features
-svm_clf = SVC(
-    kernel="rbf", #gaussian kernel
-    C=10, #penalty for misclassification
-    gamma="scale",
-)
-#svm_clf.fit(x_train, y_train) without class weighting
+svm_clf = LinearSVC(C=10, dual=False)  
 sample_weight_train = np.array([class_weights[y_i] for y_i in y_train])
 svm_clf.fit(x_train, y_train, sample_weight=sample_weight_train)
 
@@ -178,6 +174,62 @@ y_pred = svm_clf.predict(x_test)
 # Validation
 f1 = f1_score(y_test, y_pred, average = "macro") # equally weighted average of classes
 accuracy = accuracy_score(y_test, y_pred)
+recall = recall_score(y_test, y_pred, average="macro", zero_division=0)
+precision = precision_score(y_test, y_pred, average="macro", zero_division=0)
 
-print("f1:", f1)
-print("accuracy:", accuracy)
+
+print(f"Accuracy: {accuracy:.4f}")
+print(f"Macro F1: {f1:.4f}")
+print(f"Macro Recall: {recall:.4f}")
+print(f"Macro Precision: {precision:.4f}")
+
+# Confusion matrix
+cm = confusion_matrix(y_test, y_pred)
+
+# Per-class detailed metrics
+print(f"\n{'='*80}")
+print(f"DETAILED METRICS PER CLASS")
+print(f"{'='*80}")
+print(f"{'Class':<6} {'Support':<10} {'FN':<8} {'FP':<8} {'Precision':<12} {'Recall':<10} {'F1':<10}")
+print(f"{'-'*80}")
+
+results = []
+for class_idx in range(17):
+    # True Positives, False Positives, False Negatives
+    TP = cm[class_idx, class_idx]
+    FP = cm[:, class_idx].sum() - TP
+    FN = cm[class_idx, :].sum() - TP
+    
+    # Support (number of true instances)
+    support = (y_test == class_idx).sum()
+    
+    # Metrics
+    prec = TP / (TP + FP) if (TP + FP) > 0 else 0
+    rec = TP / (TP + FN) if (TP + FN) > 0 else 0
+    f1_class = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0
+    
+    print(f"{class_idx:<6} {support:<10} {FN:<8} {FP:<8} {prec:<12.4f} {rec:<10.4f} {f1_class:<10.4f}")
+    
+    results.append({
+        'Class': class_idx,
+        'Support': support,
+        'False_Negatives': FN,
+        'False_Positives': FP,
+        'Precision': prec,
+        'Recall': rec,
+        'F1': f1_class
+    })
+
+# Summary statistics
+df_results = pd.DataFrame(results)
+print(f"\n{'='*80}")
+print(f"SUMMARY STATISTICS")
+print(f"{'='*80}")
+print(f"Total False Negatives: {df_results['False_Negatives'].sum()}")
+print(f"Total False Positives: {df_results['False_Positives'].sum()}")
+print(f"Classes with recall < 0.3: {(df_results['Recall'] < 0.3).sum()}")
+print(f"Classes with recall > 0.5: {(df_results['Recall'] > 0.5).sum()}")
+
+# Save results
+df_results.to_csv('svm_per_class_metrics.csv', index=False)
+print(f"\nResults saved to 'svm_per_class_metrics.csv'")
