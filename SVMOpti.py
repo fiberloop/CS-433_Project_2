@@ -113,7 +113,7 @@ pipe = Pipeline([
     ("svc", LinearSVC(dual=False, max_iter=4000))
 ])
 
-C_values = [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000, 10_000]
+C_values = [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000]
 param_grid = {"svc__C": C_values}
 
 grid = GridSearchCV(
