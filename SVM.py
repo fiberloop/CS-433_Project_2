@@ -3,13 +3,14 @@ import csv
 import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score, recall_score, precision_score, confusion_matrix
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, PolynomialFeatures
 from sklearn.svm import SVC
 from sklearn.svm import LinearSVC
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import StratifiedKFold
 
 
+# 1. Load dataset x
 
 with open("dataset/dataset.pkl", "rb") as f:
     dataset = pickle.load(f)
@@ -50,11 +51,10 @@ data_df = pd.concat([eps_df, plies_df], axis=1)
 print(data_df.shape)    # (1_000_000, 22)
 print(data_df.head())
 
-#x = data_df.values
-# Use only the first 6 features (eps1-eps6)
-x = eps_df.values
 
-# Build label for the all dataset
+x = eps_df.values # Use only the first 6 features (eps1-eps6)
+
+# 2. Build label for the all dataset
 
 # List of the 16 FI feature columns (in a fixed order)
 fi_cols = [
@@ -74,84 +74,30 @@ has_failure = mask_failure.any(axis=1)  #  (N,), True if at least one failure fo
 F_valid = F.copy()
 F_valid[F_valid < 1] = -np.inf
 
-y = np.zeros(len(F), dtype=int)  # class 0 by default
+y = np.zeros(len(F), dtype=int)  # class 0 by default, safe class 
 max_FI = F_valid[has_failure].argmax(axis=1) + 1  # class 1..16
-y[has_failure] = max_FI #replacing at failure row index the correspodning class
+y[has_failure] = max_FI #replacing at failure row index the corresponding class
 
 
 print(y[:10])
 print(y.shape) #(1_000_000,)
 
-#count of each class
-numb_0 = len(np.where(y == 0)[0]) # no failure : 0 by default
-# failure class 1..16 :
-numb_1 = len(np.where(y == 1)[0]) 
-numb_2 = len(np.where(y == 2)[0])
-numb_3 = len(np.where(y == 3)[0])
-numb_4 = len(np.where(y == 4)[0])
-numb_5 = len(np.where(y == 5)[0])
-numb_6 = len(np.where(y == 6)[0])
-numb_7 = len(np.where(y == 7)[0])
-numb_8 = len(np.where(y == 8)[0])
-numb_9 = len(np.where(y == 9)[0])
-numb_10 = len(np.where(y == 10)[0])
-numb_11= len(np.where(y == 11)[0])
-numb_12 = len(np.where(y == 12)[0])
-numb_13 = len(np.where(y == 13)[0])
-numb_14= len(np.where(y == 14)[0])
-numb_15= len(np.where(y == 15)[0])
-numb_16 = len(np.where(y == 16)[0])
+# 3. Class weights to handle imbalanced dataset
 
-print(numb_0)
-print(numb_1)
-print(numb_2)
-print(numb_3)
-print(numb_4)
-print(numb_5)
-print(numb_6)
-print(numb_7)
-print(numb_8)
-print(numb_9)
-print(numb_10)
-print(numb_11)
-print(numb_12)
-print(numb_13)
-print(numb_14)
-print(numb_15)
-print(numb_16)
-
-
-counts = {
-    0: 209953,
-    1: 87948,
-    2: 111527,
-    3: 51882,
-    4: 57206,
-    5: 29708,
-    6: 23705,
-    7: 20207,
-    8: 12997,
-    9: 87721,
-    10: 111797,
-    11: 51575,
-    12: 56978,
-    13: 29464,
-    14: 24010,
-    15: 20295,
-    16: 13027
-}
+# Count of each class
+counts = {c: int((y == c).sum()) for c in range(17)}
+print("Class counts:", counts)
 
 N = data_df.shape[0]
-K = data_df[fi_cols].shape[1] #number of features without deformation epsilon
+K = data_df[fi_cols].shape[1] #number of failure classes
 
 class_weights = {c: N / (K * n) for c, n in counts.items()}
 
 class_weights = pd.Series(class_weights)
-class_weights /= class_weights.mean()
+class_weights /= class_weights.mean() #normalize to have unit mean 
 class_weights = class_weights.to_dict()
 
-#extract data into 80% train/ 20%test
-# x = eps_df.values only epsilon ? 
+# 4. Extract data into 80% train/ 20% test
 
 x_train, x_test, y_train, y_test = train_test_split(
     x, y,
@@ -159,19 +105,24 @@ x_train, x_test, y_train, y_test = train_test_split(
     random_state=0,
     stratify=y
 )
-#scaling 
-scaler = StandardScaler()
-x_train = scaler.fit_transform(x_train)
-x_test  = scaler.transform(x_test)
 
-# SVM
-svm_clf = LinearSVC(C=10, dual=False)  
+# 5. Standardize features : mean = 1; std = 0 and Polynomial Features degree = 2
+scaler = StandardScaler()
+poly = PolynomialFeatures(degree=2, include_bias=False)
+x_train = scaler.fit_transform(x_train)
+x_train = poly.fit_transform(x_train)
+x_test  = scaler.transform(x_test)
+x_test  = poly.transform(x_test)
+
+# 6. Define model : SVM and train with class weights of the 80 % train set
+svm_clf = LinearSVC(C=1000, dual=False)  # C= 1 for baseline
 sample_weight_train = np.array([class_weights[y_i] for y_i in y_train])
 svm_clf.fit(x_train, y_train, sample_weight=sample_weight_train)
 
-# Test
+# 7. Test over the 20% test set
 y_pred = svm_clf.predict(x_test)
-# Validation
+
+# 8. Validation
 f1 = f1_score(y_test, y_pred, average = "macro") # equally weighted average of classes
 accuracy = accuracy_score(y_test, y_pred)
 recall = recall_score(y_test, y_pred, average="macro", zero_division=0)
@@ -187,11 +138,8 @@ print(f"Macro Precision: {precision:.4f}")
 cm = confusion_matrix(y_test, y_pred)
 
 # Per-class detailed metrics
-print(f"\n{'='*80}")
-print(f"DETAILED METRICS PER CLASS")
-print(f"{'='*80}")
+print(f"Detailed per-class metrics:")
 print(f"{'Class':<6} {'Support':<10} {'FN':<8} {'FP':<8} {'Precision':<12} {'Recall':<10} {'F1':<10}")
-print(f"{'-'*80}")
 
 results = []
 for class_idx in range(17):
@@ -203,7 +151,7 @@ for class_idx in range(17):
     # Support (number of true instances)
     support = (y_test == class_idx).sum()
     
-    # Metrics
+    # Metrics : precision, recall, F1
     prec = TP / (TP + FP) if (TP + FP) > 0 else 0
     rec = TP / (TP + FN) if (TP + FN) > 0 else 0
     f1_class = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0
@@ -222,14 +170,8 @@ for class_idx in range(17):
 
 # Summary statistics
 df_results = pd.DataFrame(results)
-print(f"\n{'='*80}")
-print(f"SUMMARY STATISTICS")
-print(f"{'='*80}")
 print(f"Total False Negatives: {df_results['False_Negatives'].sum()}")
 print(f"Total False Positives: {df_results['False_Positives'].sum()}")
 print(f"Classes with recall < 0.3: {(df_results['Recall'] < 0.3).sum()}")
 print(f"Classes with recall > 0.5: {(df_results['Recall'] > 0.5).sum()}")
 
-# Save results
-df_results.to_csv('svm_per_class_metrics.csv', index=False)
-print(f"\nResults saved to 'svm_per_class_metrics.csv'")
