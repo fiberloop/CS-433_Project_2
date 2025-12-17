@@ -1,4 +1,3 @@
-# %% Package import
 
 import pickle
 import numpy as np
